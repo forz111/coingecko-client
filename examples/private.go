@@ -1,5 +1,5 @@
-package main
+package examples
 
-func main() {
-	// Private API examples will be added later
+func PrivateExample() {
+
 }

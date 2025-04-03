@@ -9,41 +9,65 @@ import (
 
 const (
 	baseURL = "https://api.coingecko.com/api/v3/"
+	defaultTimeout = 10 * time.Second
 )
 
 type Client struct {
 	httpClient *http.Client
+	baseURL string
 }
 
 func New() *Client {
 	return &Client{
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout: defaultTimeout,
 		},
+		baseURL: baseURL,
 	}
 }
 
 func (c *Client) GetPrice(coinID, currency string) (float64, error) {
-	url := fmt.Sprint("%s/simple/price?ids=%s&vs_currencies=%s", baseURL, coinID, currency)
+	if coinID == "" {
+		return 0, fmt.Errorf("%w: coinID is empty", errCoinNotFound)
+	}
+
+	url := fmt.Sprintf("%s/simple/price?ids=%s&vs_currencies=%s", c.baseURL, coinID, currency)
 
 	resp, err := c.httpClient.Get(url)
 	if err != nil {
-		return 0, fmt.Errorf("request failed: %w", err)
+		return 0, fmt.Errorf("%w: %v", ErrAPIRequestFailed, err)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("API error: %s", resp.Status)
+	switch resp.StatusCode {
+	case http.StatusTooManyRequests:
+		return 0, ErrRateLimit
+	case http.StatusNotFound:
+		return 0, fmt.Errorf("%w: %s", errCoinNotFound, coinID)
+	case http.StatusOK:
+
+	default:
+		return 0, &APIError{
+			StatusCode: resp.StatusCode,
+			Message: "unexpected status",
+		}
 	}
+
 	var result map[string]map[string]float64
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return 0, fmt.Errorf("Failed to decode response: %w", err)
+		return 0, fmt.Errorf("%w: %v", ErrDecodingFailed, err)
 	}
 
-	if price, ok := result[coinID][currency]; ok {
-		return price, nil
+	coinData, ok := result[coinID]
+	if !ok {
+		return 0, fmt.Errorf("%w: %s", errCoinNotFound, coinID)
 	}
 
-	return 0, fmt.Errorf("price not found for %s/%s", coinID, currency)
+	price, ok := coinData[currency]
+    if !ok {
+        return 0, fmt.Errorf("%w: %s", errInvalidCurrency, currency)
+    }
+
+	return price, nil
 
 }
