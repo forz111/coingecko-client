@@ -39,6 +39,10 @@ func (c *Client) GetPrice(coinID, currency string) (float64, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode == 429 {
+		return 0, fmt.Errorf("rate limit exceeded - wait 1 minute")
+	}
+
 	switch resp.StatusCode {
 	case http.StatusTooManyRequests:
 		return 0, ErrRateLimit
@@ -70,4 +74,23 @@ func (c *Client) GetPrice(coinID, currency string) (float64, error) {
 
 	return price, nil
 
+}
+
+func (c *Client) GetPriceWithRetry(coinID, currency string, maxRetries int) (float64, error) {
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		price, err := c.GetPrice(coinID, currency)
+		if err == nil {
+			return price, nil
+		}
+		lastErr = err
+
+		if attempt < maxRetries {
+			delay := time.Second * time.Duration(1<<attempt)
+			time.Sleep(delay)
+		}
+	}
+
+	return 0, fmt.Errorf("after %d attempts: %w", maxRetries, lastErr)
 }
